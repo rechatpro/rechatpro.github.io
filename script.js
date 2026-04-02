@@ -89,6 +89,9 @@
 
     // Track Pixel: Lead event when form opens
     trackPixelEvent('Lead', { content_name: 'Download Form' });
+
+    // Analytics: track form open
+    trackFormOpen();
   };
 
   window.closeLeadModal = function() {
@@ -205,6 +208,9 @@
         } else {
           console.warn('[ReChat] Supabase not available, skipping save');
         }
+
+        // ✅ Analytics: track form submit
+        trackFormSubmit();
 
         // ✅ Fire Facebook Pixel custom event: tai-zalo
         trackPixelEvent('tai-zalo', {
@@ -489,6 +495,131 @@
   }
 
   // ═══════════════════════════════════════════════════════
+  // ANALYTICS TRACKING MODULE
+  // ═══════════════════════════════════════════════════════
+  const EVENTS_TABLE = 'lp_page_events';
+  let _sessionId = null;
+  const _trackedSections = new Set();
+  let _pageviewSent = false;
+
+  function getSessionId() {
+    if (_sessionId) return _sessionId;
+    _sessionId = sessionStorage.getItem('lp_session_id');
+    if (!_sessionId) {
+      _sessionId = crypto.randomUUID ? crypto.randomUUID() : 'ses_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      sessionStorage.setItem('lp_session_id', _sessionId);
+    }
+    return _sessionId;
+  }
+
+  function detectDeviceType() {
+    const w = window.innerWidth;
+    const ua = navigator.userAgent.toLowerCase();
+    if (/tablet|ipad|playbook|silk/i.test(ua) || (w >= 600 && w <= 1024)) return 'tablet';
+    if (/mobile|iphone|ipod|android.*mobile|windows phone/i.test(ua) || w < 600) return 'mobile';
+    return 'desktop';
+  }
+
+  function detectBrowser() {
+    const ua = navigator.userAgent;
+    if (ua.includes('Edg/')) return 'Edge';
+    if (ua.includes('OPR/') || ua.includes('Opera')) return 'Opera';
+    if (ua.includes('Chrome/') && !ua.includes('Edg/')) return 'Chrome';
+    if (ua.includes('Safari/') && !ua.includes('Chrome/')) return 'Safari';
+    if (ua.includes('Firefox/')) return 'Firefox';
+    return 'Other';
+  }
+
+  function getCommonEventData() {
+    const tracking = getTrackingParams();
+    return {
+      page_url: window.location.href.split('?')[0],
+      referrer: tracking.referrer || null,
+      utm_source: tracking.utm_source,
+      utm_medium: tracking.utm_medium,
+      utm_campaign: tracking.utm_campaign,
+      utm_content: tracking.utm_content,
+      device_type: detectDeviceType(),
+      browser: detectBrowser(),
+      screen_resolution: screen.width + 'x' + screen.height,
+      session_id: getSessionId()
+    };
+  }
+
+  async function trackEvent(eventType, extra) {
+    if (!supabase) return;
+    try {
+      const data = { event_type: eventType, ...getCommonEventData(), ...extra };
+      const { error } = await supabase.from(EVENTS_TABLE).insert([data]);
+      if (error) console.warn('[Analytics] Insert error:', error.message);
+      else console.log('[Analytics]', eventType, extra || '');
+    } catch (err) {
+      console.warn('[Analytics] Error:', err.message);
+    }
+  }
+
+  // --- Pageview (once per session) ---
+  function trackPageview() {
+    if (_pageviewSent) return;
+    _pageviewSent = true;
+    trackEvent('pageview');
+  }
+
+  // --- Click tracking ---
+  function setupClickTracking() {
+    // Zalo buttons
+    document.querySelectorAll('a[href*="zalo.me"], [id*="zalo"]').forEach(el => {
+      el.addEventListener('click', () => {
+        trackEvent('click_zalo', { element_id: el.id || el.closest('[id]')?.id || 'unknown' });
+      });
+    });
+
+    // Download / CTA buttons
+    document.querySelectorAll('[id*="download"], [id*="cta-hero"], [id*="cta-solution"], [id*="cta-steps"], [id*="cta-video"], [id*="cta-final"]').forEach(el => {
+      el.addEventListener('click', () => {
+        trackEvent('click_download', { element_id: el.id || 'unknown' });
+      });
+    });
+
+    // Pricing buttons
+    document.querySelectorAll('[id*="cta-price"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const plan = el.id.replace('cta-price-', '');
+        trackEvent('click_pricing', { element_id: el.id, metadata: { plan: plan } });
+      });
+    });
+  }
+
+  // --- Section scroll tracking ---
+  function setupSectionTracking() {
+    const sections = document.querySelectorAll('section[id]');
+    if (!sections.length) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const sectionId = entry.target.id;
+          if (!_trackedSections.has(sectionId)) {
+            _trackedSections.add(sectionId);
+            trackEvent('scroll_section', { section_name: sectionId });
+          }
+        }
+      });
+    }, { threshold: 0.3 });
+
+    sections.forEach(s => observer.observe(s));
+  }
+
+  // --- Form tracking ---
+  function trackFormOpen() {
+    trackEvent('form_open');
+  }
+
+  function trackFormSubmit() {
+    trackEvent('form_submit');
+  }
+
+  // ═══════════════════════════════════════════════════════
   // INITIALIZE
   // ═══════════════════════════════════════════════════════
   function init() {
@@ -498,7 +629,14 @@
     setupCountdown();
     setupPricingPixel();
     setupZaloTracking();
-    handleScroll(); // Check initial scroll position
+    handleScroll();
+
+    // Analytics - wait for Supabase
+    setTimeout(() => {
+      trackPageview();
+      setupClickTracking();
+      setupSectionTracking();
+    }, 500);
 
     console.log('[ReChat] Landing page initialized');
     console.log('[ReChat] UTM params:', getTrackingParams());
