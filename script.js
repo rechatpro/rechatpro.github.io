@@ -423,11 +423,79 @@
   });
 
   // ═══════════════════════════════════════════════════════
+  // COUNTER ANIMATION — Trusted Bar
+  // ═══════════════════════════════════════════════════════
+  function setupCounterAnimation() {
+    const counters = document.querySelectorAll('.trusted-stat-number[data-count]');
+    if (!counters.length) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const el = entry.target;
+          const target = parseInt(el.dataset.count, 10);
+          const duration = 2000;
+          const start = performance.now();
+
+          function formatNumber(n) {
+            if (n >= 1000) return n.toLocaleString('vi-VN');
+            return n.toString();
+          }
+
+          function animate(now) {
+            const elapsed = now - start;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+            const current = Math.floor(eased * target);
+            el.textContent = formatNumber(current);
+            if (progress < 1) requestAnimationFrame(animate);
+          }
+
+          requestAnimationFrame(animate);
+          observer.unobserve(el);
+        }
+      });
+    }, { threshold: 0.5 });
+
+    counters.forEach(c => observer.observe(c));
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // COUNTDOWN TIMER — Daily Reset
+  // ═══════════════════════════════════════════════════════
+  function setupCountdown() {
+    const hoursEl = document.getElementById('cd-hours');
+    const minutesEl = document.getElementById('cd-minutes');
+    const secondsEl = document.getElementById('cd-seconds');
+    if (!hoursEl || !minutesEl || !secondsEl) return;
+
+    function update() {
+      const now = new Date();
+      const endOfDay = new Date(now);
+      endOfDay.setHours(23, 59, 59, 999);
+      const diff = endOfDay - now;
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+      hoursEl.textContent = String(hours).padStart(2, '0');
+      minutesEl.textContent = String(minutes).padStart(2, '0');
+      secondsEl.textContent = String(seconds).padStart(2, '0');
+    }
+
+    update();
+    setInterval(update, 1000);
+  }
+
+  // ═══════════════════════════════════════════════════════
   // INITIALIZE
   // ═══════════════════════════════════════════════════════
   function init() {
     initSupabase();
     setupScrollAnimations();
+    setupCounterAnimation();
+    setupCountdown();
     setupPricingPixel();
     setupZaloTracking();
     handleScroll(); // Check initial scroll position
